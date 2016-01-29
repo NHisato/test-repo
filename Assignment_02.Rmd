@@ -1,0 +1,157 @@
+---
+title: "To know from data whether barbell was lifted correctly."
+author: "Hisato Nagano"
+date: "2016/01/29"
+output: html_document
+---
+# I Background  
+
+ Data about personal activity are easily available using devices such as Jawbone Up, Nike FuelBand, and Fitbit.   
+ In this project, using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, performance of barbell lifts in 5 different ways will be predicted, whether it did correctly or incorrectly.  
+ According to the information which is available from the website here: <http://groupware.les.inf.puc-rio.br/har>  
+  "Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes."
+
+Read more: <http://groupware.les.inf.puc-rio.br/har#ixzz3ySQsO5Hp> 
+
+Read more: <http://groupware.les.inf.puc-rio.br/har#ixzz3ySQRUhLk>
+
+#Parallel Processing
+
+```{r}
+library(doParallel,verbose = FALSE)
+rCluster<-makePSOCKcluster(3)
+registerDoParallel(rCluster)
+```
+
+# II Data loading  
+
+The training data for this project are available here:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>  
+
+The test data are available here:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>  
+
+```{r}
+training<- read.csv("./Data/pml-training.csv")
+testing<- read.csv("./Data/pml-testing.csv")
+dim(training)
+dim(testing)
+#summary(training)
+#names(testing)
+```
+
+Data testing has not y=classe column (colnames(testing)[160]="problem_id").
+So training should be splitted after preprocessing.
+
+# III Preprosessing 
+
+### 1. Remove unnecessary variables
+
+ "X" and training[,3:7] are not necessary in this examination.
+ 
+```{r}
+training<-training[,c(2,8:160)]
+```
+
+### 2. Imputation  
+
+ NA's will convert to median value. Some variables has 19216 NA's (97.9% of 19622, total number of the observations), these variables will be vanished in the next step as near zero variances.  
+ 
+```{r}
+library(caret,verbose = F)
+set.seed(777)
+preProcValues <-preProcess(training, method = c("medianImpute"))
+m.training<- predict(preProcValues, training)
+```
+
+### 3. Neglecting Zero- and Near Zero-Variance Predictors  
+
+```{r}
+nzv <- nearZeroVar(m.training)
+nz.training <- m.training[, -nzv]
+dim(nz.training)
+#summary(nz.training)
+```
+
+ Now we have only 53 predictors.
+
+### 4. Splitting nz.taining to traindata and testdata
+
+ As mentioned previously we must split data to training and testing sets.  
+
+```{r}
+inTrain <-createDataPartition(y=nz.training$classe, p=0.70, list=FALSE)
+trainingdata <- nz.training[inTrain,]
+testingdata <- nz.training[-inTrain,]
+```
+# IV Some model fitting and validation
+
+### 1.Linear Discriminant Model
+
+```{r}
+mod.lda <- train(classe ~ ., method = "lda",data = trainingdata)
+pred.lda <- predict(mod.lda, newdata = testingdata)
+conf.lda <-confusionMatrix(pred.lda, testingdata$classe)
+conf.lda$table
+conf.lda$overall[1]
+```
+
+### 2. Stochastic Gradient Boosting
+
+```{r}
+library(gbm,verbose = FALSE)
+library(survival,verbose = FALSE)
+library(plyr,verbose = FALSE)
+mod.gbm<- train(classe ~ ., method = "gbm",data = trainingdata,verbose = F)
+pred.gbm<- predict(mod.gbm, newdata = testingdata)
+conf.gbm<-confusionMatrix(pred.gbm, testingdata$classe)
+conf.gbm$table
+conf.gbm$overall[1]
+```
+
+### 3. Classification and Decision Tree (CART)
+
+```{r}
+library(rpart,verbose = FALSE)
+mod.rpart<- train(classe ~ ., method = "rpart" ,data = trainingdata)
+pred.rpart<- predict(mod.rpart, newdata = testingdata)
+conf.rpart<-confusionMatrix(pred.rpart, testingdata$classe)
+conf.rpart$table
+conf.rpart$overall[1]
+```
+
+### 4. Random Forest
+
+```{r}
+library(randomForest,verbose = FALSE)
+mod.rf<- train(classe ~ ., method = "rf" ,data = trainingdata)
+pred.rf<- predict(mod.rf, newdata = testingdata)
+conf.rf<- confusionMatrix(pred.rf, testingdata$classe)
+conf.rf$table
+conf.rf$overall[1]
+```
+
+### 5. Naive Bayse 
+ 
+```{r}
+library(NB,verbose = FALSE)
+mod.nb<-train(classe~.,model="nb",data=trainingdata)
+pred.nb<-predict(mod.nb,newdata=testingdata)
+conf.nb<-confusionMatrix(pred.nb, testingdata$classe)
+conf.nb$table
+conf.nb$overall[1]
+``` 
+
+# V Conclusion
+
+ Values of accuracy showed below.
+ 
+```{r}
+library(xtable,verbose = FALSE)
+method<-c("lda","gbm","rpart","rf","nb")
+accuracy<-c(conf.lda$overall[1],conf.gbm$overall[1],conf.rpart$overall[1],conf.rf$overall[1],conf.nb$overall[1])
+df<-data.frame(method=method,accuracy=accuracy)
+print(xtable(df),type="html")
+```
+ 
+ Data were well processed to reject noises.  I built five models, such as lda, gbm, rpart, rf and nb. Accuracies were calculated and I decided rf (random forest) was the most useful model in this situation. 
